@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include "BLEDevice.h"
+#include <Wire.h>
+#include "Adafruit_DRV2605.h"
 
 #define LED_PIN D7
 
@@ -12,6 +14,10 @@ static boolean doScan = false;
 
 static BLEAdvertisedDevice* myDevice;
 static BLERemoteCharacteristic* pRemoteCharacteristic;
+
+Adafruit_DRV2605 drv;
+
+uint8_t effect = 1;
 
 static void notifyCallback(
   BLERemoteCharacteristic* pBLERemoteCharacteristic,
@@ -29,6 +35,10 @@ static void notifyCallback(
   Serial.println(message);
 
   if (message == "Vibrating...") {
+    drv.setWaveform(0, effect);
+    drv.setWaveform(1, 0);
+    drv.go();
+
     digitalWrite(LED_PIN, HIGH);
     Serial.println("Vibrating");
     delay(500);
@@ -113,6 +123,16 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
 
 void setup() {
   Serial.begin(115200);
+  Wire.begin();
+
+  if (!drv.begin()) {
+    Serial.println("DRV2605 not found. Check wiring.");
+  } else {
+    Serial.println("DRV2605 found.");
+  }
+
+  drv.selectLibrary(1);
+  drv.setMode(DRV2605_MODE_INTTRIG);
   delay(1000);
 
   pinMode(LED_PIN, OUTPUT);
