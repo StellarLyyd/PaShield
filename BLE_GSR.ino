@@ -4,7 +4,6 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <Wire.h>
-#include "Adafruit_DRV2605.h"
 
 const int GSR = A3;
 
@@ -14,8 +13,6 @@ int moving_avg = 0;
 
 int moving_average_array[10] = {0};
 int indexPos = 0;
-
-Adafruit_DRV2605 drv;
 
 #define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9A"
 #define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9A"
@@ -57,15 +54,6 @@ void setup() {
 
   Wire.begin();
 
-  if (!drv.begin()) {
-    Serial.println("DRV2605 not found. Check wiring.");
-  } else {
-    Serial.println("DRV2605 found.");
-  }
-
-  drv.selectLibrary(1);
-  drv.setMode(DRV2605_MODE_INTTRIG);
-
   BLEDevice::init("PaShield");
 
   Serial.print("BLE MAC: ");
@@ -97,8 +85,6 @@ void setup() {
 
   Serial.println("BLE server started. Waiting for client...");
 }
-
-uint8_t effect = 1;
 
 void loop() {
   if (deviceConnected) {
@@ -134,13 +120,10 @@ void loop() {
                      ", DIFF=" + String(diff);
 
     Serial.println(message);
+    //Serial.println(gsr_average);
 
     if (diff > 100 && gsr_average < 2000 && gsr_average > 1000) {
       Serial.println("Significant change detected. Vibrating.");
-
-      drv.setWaveform(0, effect);
-      drv.setWaveform(1, 0);
-      drv.go();
 
       digitalWrite(D7, HIGH);
       
