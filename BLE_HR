@@ -1,0 +1,221 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <Wire.h>
+#include "MAX30105.h"
+
+long lastBeatTime = 0;
+float bpm = 0;
+float bpmAvg = 0;
+
+const byte BPM_AVG_SIZE = 8;
+float bpmBuffer[BPM_AVG_SIZE];
+byte bpmIndex = 0;
+
+long prev2 = 0;
+long prev1 = 0;
+long signal_here = 0;
+
+long baseline = 0;
+long peak = 0;
+
+MAX30105 particleSensor;
+
+#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9A"
+#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9A"
+#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9A"
+
+BLEServer *pServer = nullptr;
+BLECharacteristic *pTxCharacteristic = nullptr;
+
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *pServer) {
+    deviceConnected = true;
+    Serial.println("Client connected");
+  }
+
+  void onDisconnect(BLEServer *pServer) {
+    deviceConnected = false;
+    Serial.println("Client disconnected");
+  }
+};
+
+class MyRxCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    String rxValue = pCharacteristic->getValue();
+
+    if (rxValue.length() > 0) {
+      Serial.print("Received from client: ");
+      Serial.println(rxValue);
+    }
+  }
+};
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(D7, OUTPUT);
+
+  // Initialize sensor
+  while (!particleSensor.begin(Wire, I2C_SPEED_FAST)) //Use default I2C port, 400kHz speed
+  {
+    Serial.println("MAX30105 was not found. Please check wiring/power. ");
+  }
+
+  //Setup to sense a nice looking saw tooth on the plotter
+  byte ledBrightness = 0x1F; //Options: 0=Off to 255=50mA
+  byte sampleAverage = 8; //Options: 1, 2, 4, 8, 16, 32
+  byte ledMode = 3; //Options: 1 = Red only, 2 = Red + IR, 3 = Red + IR + Green
+  int sampleRate = 100; //Options: 50, 100, 200, 400, 800, 1000, 1600, 3200
+  int pulseWidth = 411; //Options: 69, 118, 215, 411
+  int adcRange = 4096; //Options: 2048, 4096, 8192, 16384
+
+  particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange); //Configure sensor with these settings
+
+  //Arduino plotter auto-scales annoyingly. To get around this, pre-populate
+  //the plotter with 500 of an average reading from the sensor
+
+  //Take an average of IR readings at power up
+  /*
+  const byte avgAmount = 64;
+  long baseValue = 0;
+  for (byte x = 0 ; x < avgAmount ; x++)
+  {
+    baseValue += particleSensor.getIR(); //Read the IR value
+  }
+  baseValue /= avgAmount;
+
+  //Pre-populate the plotter so that the Y scale is close to IR values
+  for (int x = 0 ; x < 500 ; x++)
+    Serial.println(baseValue);
+  
+  */
+
+  // SERVER STUFF
+
+  BLEDevice::init("PaShield");
+
+  Serial.print("BLE MAC: ");
+  Serial.println(BLEDevice::getAddress().toString().c_str());
+
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  pTxCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID_TX,
+    BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pTxCharacteristic->addDescriptor(new BLE2902());
+
+  BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID_RX,
+    BLECharacteristic::PROPERTY_WRITE
+  );
+  pRxCharacteristic->setCallbacks(new MyRxCallbacks());
+
+  pService->start();
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->start();
+
+  Serial.println("BLE server started. Waiting for client...");
+}
+
+void loop() {
+  if (deviceConnected) {
+
+    // BPM POST PROCESSING
+
+    Serial.println(particleSensor.getIR()); //Send raw data to plotter
+
+    signal_here = particleSensor.getIR();
+
+    // Slow moving baseline
+    baseline = baseline * 0.995 + signal_here * 0.005;
+
+    // AC component
+    long ac = signal_here - baseline;
+
+    // Track peak amplitude
+    if (ac > peak)
+        peak = ac;
+    else
+        peak *= 0.995;
+
+    // Adaptive threshold
+    long threshold = peak * 0.45;
+
+    // Local maximum detector
+    bool isPeak =
+        (prev1 > prev2) &&
+        (prev1 > ac) &&
+        (prev1 > threshold);
+
+    if (isPeak)
+    {
+        unsigned long now = millis();
+
+        if (now - lastBeatTime > 200)   // Ignore impossible HR >200 BPM
+        {
+            bpm = 60000.0 / (now - lastBeatTime);
+            lastBeatTime = now;
+
+            if (bpm > 35 && bpm < 200)
+            {
+                bpmBuffer[bpmIndex++] = bpm;
+                bpmIndex %= BPM_AVG_SIZE;
+
+                bpmAvg = 0;
+                for (int i = 0; i < BPM_AVG_SIZE; i++)
+                    bpmAvg += bpmBuffer[i];
+                bpmAvg /= BPM_AVG_SIZE;
+
+                Serial.print("BPM: ");
+                Serial.println(bpmAvg);
+            }
+        }
+    }
+
+    prev2 = prev1;
+    prev1 = ac;
+
+    digitalWrite(D7, LOW);
+
+    String message = "hello world";
+    //String message = "IR: " + String(signal_here) + ", Avg BPM: " + String(bpmAvg);
+    //Serial.println(message);
+
+    if (bpmAvg > 100 && signal_here > 50000) { // IR < 50000 = not touching
+      Serial.println("Elevated heart rate detected. Vibrating.");
+
+      digitalWrite(D7, HIGH);
+      
+      message = "Vibrating...";
+      delay(500);
+    }
+
+    pTxCharacteristic->setValue(message.c_str());
+    pTxCharacteristic->notify();
+
+    delay(100);
+  }
+
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(500);
+    BLEDevice::startAdvertising();
+    Serial.println("Restart advertising...");
+    oldDeviceConnected = false;
+  }
+
+  if (deviceConnected && !oldDeviceConnected) {
+    oldDeviceConnected = true;
+  }
+}
