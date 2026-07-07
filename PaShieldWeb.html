@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PaShield ESP32 Camera Dashboard</title>
+    <style>
+        body {
+            margin: 0;
+            background: #222;
+            color: white;
+            font-family: 'Times New Roman', serif;
+            text-align: center;
+        }
+
+        .container {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            padding: 20px;
+        }
+
+        .camera {
+            width: 45%;
+        }
+
+        img {
+            width: 100%;
+            border: 2px solid white;
+            border-radius: 10px;
+        }
+
+        h2 {
+            margin-bottom: 10px;
+        }
+	 button { 
+            font-family: 'Times New Roman', serif; /* Change font */ 
+            font-size: 16px; /* Adjust font size */ 
+        } 
+    </style>
+</head>
+<body>
+
+<h1>ESP32 Camera Streams</h1>
+
+<div class="container">
+    <div class="camera">
+        <h2>Camera 1</h2>
+
+	<img id="cam1" src="http://10.101.3.207/" width="400">
+        
+	<button onclick="fetch('http://10.101.3.207/start'); reloadCam1();">
+	Start Cam 1
+	</button>
+	<button onclick="fetch('http://10.101.3.207/stop')">
+	Stop Cam 1
+	</button>
+
+	<script>
+	function reloadCam1() {
+  	document.getElementById("cam1").src = "http://10.101.3.207/?t=" + Date.now();
+	}
+	</script>
+    </div>
+
+    <div class="camera">
+        <h2>Camera 2</h2>
+
+	<img id="cam2" src="http://10.101.4.93/" width="400">
+	
+	<button onclick="fetch('http://10.101.4.93/start'); reloadCam2();">
+	Start Cam 2
+	</button>
+
+	<button onclick="fetch('http://10.101.4.93/stop')">
+	Stop Cam 2
+	</button>
+
+	<script>
+	function reloadCam2() {
+  	document.getElementById("cam2").src = "http://10.101.4.93/?t=" + Date.now();
+	}
+	</script>
+
+    </div>
+</div>
+
+</body>
+</html>
