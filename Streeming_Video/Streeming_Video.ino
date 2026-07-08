@@ -7,7 +7,6 @@
 const char* ssid = "Rev Member";
 const char* password = "incubator";
 
-
 #define CAMERA_MODEL_XIAO_ESP32S3
 #include "camera_pins.h"
 
@@ -30,6 +29,10 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
   if (res != ESP_OK) return res;
 
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  httpd_resp_set_hdr(req, "Pragma", "no-cache");
+
   while (true) {
     fb = esp_camera_fb_get();
 
@@ -39,23 +42,27 @@ static esp_err_t stream_handler(httpd_req_t *req) {
       break;
     }
 
-    size_t hlen = snprintf(part_buf, 64, _STREAM_PART, fb->len);
-    res = httpd_resp_send_chunk(req, part_buf, hlen);
+    size_t hlen = snprintf(part_buf, sizeof(part_buf), _STREAM_PART, fb->len);
+
+    res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
+
+    if (res == ESP_OK) {
+      res = httpd_resp_send_chunk(req, part_buf, hlen);
+    }
 
     if (res == ESP_OK) {
       res = httpd_resp_send_chunk(req, (const char *)fb->buf, fb->len);
     }
 
-    if (res == ESP_OK) {
-      res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-    }
-
     esp_camera_fb_return(fb);
     fb = NULL;
 
-    if (res != ESP_OK) break;
+    if (res != ESP_OK) {
+      Serial.println("Client disconnected or stream error");
+      break;
+    }
 
-    delay(30);
+    delay(60);
   }
 
   return res;
@@ -64,6 +71,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 void startCameraServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = 80;
+  config.ctrl_port = 32768;
 
   httpd_uri_t index_uri = {
     .uri = "/",
@@ -83,6 +91,8 @@ void startCameraServer() {
 void setup() {
   Serial.begin(115200);
   delay(3000);
+
+  //WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
   Serial.println();
   Serial.println("Starting XIAO ESP32S3 Sense OV3660 camera...");
@@ -114,12 +124,10 @@ void setup() {
   config.xclk_freq_hz = 10000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  // Increased resolution from QVGA to VGA
-  config.frame_size = FRAMESIZE_VGA;   // 640x480
-  config.jpeg_quality = 3;            // lower number = better quality
-  config.fb_count = 1;
-
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.frame_size = FRAMESIZE_VGA;      // 320x240
+  config.jpeg_quality = 20;                // higher = smaller file, less lag
+  config.fb_count = 2;
+  config.grab_mode = CAMERA_GRAB_LATEST;   // avoids old-frame buildup
   config.fb_location = CAMERA_FB_IN_PSRAM;
 
   Serial.println("Initializing camera...");
@@ -143,14 +151,15 @@ void setup() {
     }
 
     s->set_framesize(s, FRAMESIZE_VGA);
-    s->set_quality(s, 12);
+    s->set_quality(s, 20);
     s->set_brightness(s, 0);
     s->set_contrast(s, 0);
     s->set_saturation(s, 0);
   }
 
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(true);
+  WiFi.setSleep(false);
+  // If this causes reset on your board, comment it out.
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
 
   Serial.print("Connecting to WiFi: ");
