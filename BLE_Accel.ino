@@ -50,12 +50,6 @@ void setup() {
   Serial.begin(115200);
   pinMode(D7, OUTPUT);
 
-  // MPU SETUP
-
-  while (!Serial) {
-    delay(10); // will pause Zero, Leonardo, etc until serial console opens
-  }
-
   // Try to initialize!
   if (!mpu.begin()) {
     Serial.println("Failed to find MPU6050 chip");
